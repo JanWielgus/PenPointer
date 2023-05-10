@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <Fusion/Fusion.h>
 #include <type_traits>
+#include <Tasker.h>
 
 BleMouse bleMouse;
 SimpleMPU6050 mpu;
@@ -16,7 +17,6 @@ const uint32_t SamplePeriod_us = SamplePeriod_s * 1000000;
 
 const float MouseSensitivity = 5000.f;
 
-const int BTSendingFrequencyDivider = 6;
 
 const FusionAhrsSettings fusionSettings = { // TODO: test different settings
   .gain = 0.5f,
@@ -57,13 +57,73 @@ public:
   }
 };
 
-Derivative mouseX, mouseY;
-float derivSumX = 0, derivSumY = 0;
-int freqDividerCounter = 0;
+
+Tasker tasker(10);
+
+float cursorDisplacementSumX = 0;
+float cursorDisplacementSumY = 0;
+
+
+
+class : public IExecutable
+{
+  FusionEuler euler;
+  Derivative derivativeX, derivativeY;
+
+  void execute() override
+  {
+    updateIMU();
+    updateCalculations();
+  }
+
+  void updateIMU()
+  {
+    mpu.readRawData();
+    auto acc = mpu.getNormalizedAcceleration();
+    auto gyro = mpu.getNormalizedRotation();
+    FusionVector fusionGyro = {gyro.x, gyro.y, gyro.z};
+    FusionVector fusionAcc = {acc.x, acc.y, acc.z};
+
+    fusionGyro = FusionOffsetUpdate(&fusionOffset, fusionGyro);
+    FusionAhrsUpdateNoMagnetometer(&ahrs, fusionGyro, fusionAcc, SamplePeriod_s);
+    euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
+
+    // Serial.printf("%0.1f\t%0.1f\t%0.1f\n", euler.angle.roll, euler.angle.pitch, euler.angle.yaw);
+    // printFloat3(fusionGyro.array);
+    // printFloat3(euler.array); /////
+    // printFloat3(&gyro.x);
+    // auto rawGyro = mpu.getRawRotation();
+    // printInt3(&rawGyro.x);
+  }
+
+  void updateCalculations()
+  {
+    derivativeX.update(-euler.angle.yaw, SamplePeriod_s);
+    derivativeY.update(euler.angle.pitch, SamplePeriod_s);
+
+    float mouseXValue = derivativeX.getLastDerivative() * MouseSensitivity;
+    float mouseYValue = derivativeY.getLastDerivative() * MouseSensitivity;
+    // Serial.print(mouseXValue);
+    // Serial.print('\t');
+    // Serial.println(mouseYValue);
+
+    cursorDisplacementSumX += mouseXValue;
+    cursorDisplacementSumY += mouseYValue;
+  }
+} updatePenPointer_task;
+
+
+class : public IExecutable
+{
+  void execute() override
+  {
+    bleMouse.move(cursorDisplacementSumX, cursorDisplacementSumY);
+    cursorDisplacementSumX = cursorDisplacementSumY = 0;
+  }
+} sendData_task;
 
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.println("Starting BLE work!");
   bleMouse.begin();
@@ -71,71 +131,17 @@ void setup() {
   Wire.begin();
   Wire.setClock(400000L);
   mpu.initialize();
+  mpu.setGyroOffset(-194, 1, -53);
 
   FusionAhrsInitialise(&ahrs);
   FusionAhrsSetSettings(&ahrs, &fusionSettings);
   FusionOffsetInitialise(&fusionOffset, SampleRate_Hz);
 
-  mpu.setGyroOffset(-194, 1, -53);
+  tasker.addTask_Hz(&updatePenPointer_task, SampleRate_Hz);
+  tasker.addTask_Hz(&sendData_task, 50.f);
 }
 
+
 void loop() {
-  uint32_t startTime_us = micros();
-
-  mpu.readRawData();
-
-  // auto acc = mpu.getNormalizedAcceleration();
-  // Serial.println(acc.x);
-
-  auto acc = mpu.getNormalizedAcceleration();
-  auto gyro = mpu.getNormalizedRotation();
-
-  FusionVector fusionGyro = {gyro.x, gyro.y, gyro.z};
-  FusionVector fusionAcc = {acc.x, acc.y, acc.z};
-
-  fusionGyro = FusionOffsetUpdate(&fusionOffset, fusionGyro);
-
-  FusionAhrsUpdateNoMagnetometer(&ahrs, fusionGyro, fusionAcc, SamplePeriod_s);
-
-  FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
-
-  // Serial.printf("%0.1f\t%0.1f\t%0.1f\n", euler.angle.roll, euler.angle.pitch, euler.angle.yaw);
-  // printFloat3(fusionGyro.array);
-  // printFloat3(euler.array); /////
-  // printFloat3(&gyro.x);
-  // auto rawGyro = mpu.getRawRotation();
-  // printInt3(&rawGyro.x);
-
-  mouseX.update(-euler.angle.yaw, SamplePeriod_s);
-  mouseY.update(euler.angle.pitch, SamplePeriod_s);
-
-  float mouseXValue = mouseX.getLastDerivative() * MouseSensitivity;
-  float mouseYValue = mouseY.getLastDerivative() * MouseSensitivity;
-  // Serial.print(mouseXValue);
-  // Serial.print('\t');
-  // Serial.println(mouseYValue);
-
-  derivSumX += mouseXValue;
-  derivSumY += mouseYValue;
-  
-
-  // Every BTSendingFrequencyDivider execution
-  if (freqDividerCounter == 0)
-  {
-    bleMouse.move(derivSumX, derivSumY);
-    derivSumX = derivSumY = 0;
-  }
-  freqDividerCounter++;
-  if (freqDividerCounter == BTSendingFrequencyDivider)
-    freqDividerCounter = 0;
-
-
-  // bleMouse.move(mouseXValue, mouseYValue);
-
-
-  // int32_t timeToWait_us = SamplePeriod_us - (micros() - startTime_us);
-  // // Serial.println(timeToWait_us);
-  // delayMicroseconds(timeToWait_us < 0 ? 0 : timeToWait_us);
-  while (micros() < (startTime_us + SamplePeriod_us));
-  // END
+  tasker.loop();
 }
