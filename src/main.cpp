@@ -118,6 +118,11 @@ class : public IExecutable
   void execute() override
   {
     bleMouse.move(cursorDisplacementSumX, cursorDisplacementSumY);
+
+    // Serial.print(cursorDisplacementSumX);
+    // Serial.print('\t');
+    // Serial.println(cursorDisplacementSumY);
+
     cursorDisplacementSumX = cursorDisplacementSumY = 0;
   }
 } sendData_task;
