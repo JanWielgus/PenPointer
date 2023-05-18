@@ -1,10 +1,12 @@
+#pragma once
+
 #include <cstdint>
 #include <Fusion/FusionMath.h>
 
 
 /// @brief Offset class dynamically calculates offset of input value
 /// (how much it is displaced from 0 when it is in threshold).
-class Offset
+class VectorOffset
 {
     float threshold;
 
@@ -22,7 +24,7 @@ public:
     /// @param convergeRate How fast value will converge to 0 when within threshold and time elapsed.
     /// @param convergeDelay_s Time that has to elapse when value is withing threshold to start converging to 0 [seconds].
     /// @param threshold Min/max range that value has to be in to start converging.
-    Offset(float dT_s, float convergeRate, float convergeDelay_s, float threshold)
+    VectorOffset(float dT_s, float convergeRate, float convergeDelay_s, float threshold)
     {
         this->threshold = threshold;
 
@@ -34,7 +36,7 @@ public:
     }
 
     /// @brief Calculate offset and get value with applied offset.
-    FusionVector updateValue(FusionVector newValue)
+    FusionVector update(FusionVector newValue)
     {
         // Apply current offset
         newValue = FusionVectorSubtract(newValue, offset);
