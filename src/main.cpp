@@ -29,7 +29,7 @@ const FusionAhrsSettings fusionSettings = {
     .gain = 0.5f,
     .accelerationRejection = 10.0f,
     .magneticRejection = 20.0f,
-    .rejectionTimeout = (uint16_t)(5 * SampleRate_Hz), /* 5 seconds */
+    .recoveryTriggerPeriod = (uint16_t)(5 * SampleRate_Hz), /* 5 seconds */
 };
 
 void printFloat3(const float *arr);
